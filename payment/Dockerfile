@@ -1,4 +1,4 @@
-FROM maven:3.8.5-openjdk-21-slim AS backendBuild
+FROM maven:3.8.5-openjdk-17-slim AS backendBuild
 WORKDIR /root/src/backend
 COPY . .
 RUN mvn package  -DskipTests

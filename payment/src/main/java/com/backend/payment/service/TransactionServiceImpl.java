@@ -1,23 +1,26 @@
 package com.backend.payment.service;
 
+import com.backend.payment.dto.PaymentCard;
 import com.backend.payment.dto.Transaction;
+import com.backend.payment.dto.TransactionResponseDTO;
 import com.backend.payment.exception.EntityDoesNotExistsException;
-import com.backend.payment.model.BenefitEntity;
-import com.backend.payment.model.CompanyBenefit;
-import com.backend.payment.model.TransactionEntity;
-import com.backend.payment.model.UserEntity;
+import com.backend.payment.exception.InsufficientBalanceException;
+import com.backend.payment.model.*;
 import com.backend.payment.repository.TransactionRepository;
 import com.backend.payment.service.serviceInterface.BenefitService;
 import com.backend.payment.service.serviceInterface.PaymentCardService;
 import com.backend.payment.service.serviceInterface.TransactionService;
 import com.backend.payment.service.serviceInterface.UserService;
-import jakarta.transaction.Transactional;
+
 import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.util.ArrayList;
+import java.util.List;
 
 @Service
 @AllArgsConstructor
-@Transactional
 public class TransactionServiceImpl implements TransactionService {
 
     private final TransactionRepository transactionRepository;
@@ -33,27 +36,62 @@ public class TransactionServiceImpl implements TransactionService {
                 .value(transactionDto.getValue())
                 .paymentCard(user.getPaymentCard())
                 .benefit(benefitEntity)
+                .description("Success")
+                .transactionStatus(TransactionStatus.SUCCESS)
                 .build();
-        switch (user.getPaymentCard().getCardType()){
-            case STANDARD:
-                CompanyBenefit companyBenefit=checkIfBenefitInCompanyBenefits(user, benefitEntity);
-                if(companyBenefit == null) {
-                    throw new EntityDoesNotExistsException("Benefit not in company benefits");
-                }
-                break;
-            case PREMIUM:
-                break;
-            case PLATINUM:
-                CompanyBenefit platinumCompanyBenefit=checkIfBenefitInCompanyBenefits(user, benefitEntity);
-                if (platinumCompanyBenefit != null) {
-                    transaction.setValue(transaction.getValue() * platinumCompanyBenefit.getDiscount());
-                }
-                break;
-            default:
-                throw new EntityDoesNotExistsException("Card type does not exist");
+        try {
+            switch (user.getPaymentCard().getCardType()) {
+                case STANDARD:
+                    CompanyBenefit companyBenefit = checkIfBenefitInCompanyBenefits(user, benefitEntity);
+                    if (companyBenefit == null) {
+                        throw new EntityDoesNotExistsException("Benefit not in company benefits");
+                    }
+                    break;
+                case PREMIUM:
+                    break;
+                case PLATINUM:
+                    CompanyBenefit platinumCompanyBenefit = checkIfBenefitInCompanyBenefits(user, benefitEntity);
+                    if (platinumCompanyBenefit != null) {
+                        long discountedValue = (transaction.getValue() * (1 - platinumCompanyBenefit.getDiscount()));
+                        transaction.setValue(discountedValue);
+                    }
+                    break;
+                default:
+                    throw new EntityDoesNotExistsException("Card type does not exist");
+            }
+            paymentCardService.balanceUpdate(user.getPaymentCard(),transaction.getValue());
+            return saveTransaction(transaction);
+        }catch (EntityDoesNotExistsException | InsufficientBalanceException ex) {
+            transaction.setTransactionStatus(TransactionStatus.FAILURE);
+            transaction.setDescription(ex.getMessage());
+            saveTransaction(transaction);
+            throw ex;
         }
-        paymentCardService.balanceUpdate(user.getPaymentCard(),transaction.getValue());
-        return saveTransaction(transaction);
+    }
+
+    @Override
+    public List<TransactionResponseDTO> getByStatus(TransactionStatus status) {
+        List<TransactionEntity> entities = transactionRepository.findByTransactionStatus(status);
+        List<TransactionResponseDTO> responseDTOs = new ArrayList<>();
+
+        for (TransactionEntity entity : entities) {
+            PaymentCard paymentCard = PaymentCard.builder()
+                    .cardType(entity.getPaymentCard().getCardType())
+                    .balance(entity.getPaymentCard().getBalance())
+                    .build();
+            TransactionResponseDTO responseDTO = TransactionResponseDTO.builder()
+                    .benefitName(entity.getBenefit().getName())
+                    .benefitCategory(entity.getBenefit().getBenefitCategory().getCategoryName())
+                    .value(entity.getValue())
+                    .description(entity.getDescription())
+                    .transactionStatus(entity.getTransactionStatus())
+                    .paymentCard(paymentCard)
+                    .build();
+
+            responseDTOs.add(responseDTO);
+        }
+
+        return responseDTOs;
     }
 
     private CompanyBenefit checkIfBenefitInCompanyBenefits(UserEntity user, BenefitEntity benefitEntity) {
@@ -63,7 +101,7 @@ public class TransactionServiceImpl implements TransactionService {
                 .findFirst()
                 .orElse(null);
     }
-
+    @Transactional
     public Integer saveTransaction(TransactionEntity entity){
         return transactionRepository.save(entity).getId();
     }

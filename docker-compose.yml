@@ -1,0 +1,45 @@
+version: '3.7'
+
+services:
+  payment_service:
+    image: payment_service
+    ports:
+      - 8082:8082
+    build:
+      context: ./payment/
+      dockerfile: Dockerfile
+    environment:
+      DB_HOST: ${DB_HOST}
+      DB_PORT: 5432
+      DB_NAME: payment
+      DB_USERNAME: ${DB_USERNAME}
+      DB_PASSWORD: ${DB_PASSWORD}
+    depends_on:
+      - postgres
+      - pgadmin
+
+  postgres:
+    image: postgres:latest
+    env_file:
+      - .env
+    ports:
+      - 5432:5432
+    volumes:
+      - postgres_data_container:/var/lib/postgresql/data
+    environment:
+      POSTGRES_DB: payment
+      POSTGRES_USER: ${DB_USERNAME}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD}
+    ports:
+      - 5050:80
+    depends_on:
+      - postgres
+
+
+volumes:
+  postgres_data_container:
